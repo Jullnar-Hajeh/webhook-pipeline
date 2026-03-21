@@ -3,7 +3,7 @@ import pipelineRoutes from "./modules/pipelines/pipeline.routes";
 import webhookRoutes from "./modules/webhooks/webhook.routes"; 
 import { notFound } from "./middleware/notFound";
 import { errorHandler } from "./middleware/errorHandler";
-
+import jobRoutes from "./modules/jobs/job.routes";
 const app = express();
 
 app.use(express.json());
@@ -15,6 +15,7 @@ app.get("/", (_req, res) => {
 });
 
 app.use("/pipelines", pipelineRoutes);
+app.use("/jobs", jobRoutes);
 app.use("/webhooks", webhookRoutes);
 
 export default app;
