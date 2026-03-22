@@ -1,33 +1,33 @@
-export function processPayload(actionType: string, payload: any, config: any): any {
-    const data = typeof payload === "object" && payload !== null ? { ...payload } : { data: payload };
+export function processPayload(actionType: string, payload: any, actionConfig: any = {}) {
+    let data = typeof payload === "object" && payload !== null ? { ...payload } : { data: payload };
 
     switch (actionType) {
         case "uppercase":
-            const upperData: any = {};
-            for (const [key, value] of Object.entries(data)) {
-                upperData[key] = typeof value === "string" ? value.toUpperCase() : value;
+            for (const key in data) {
+                if (typeof data[key] === "string") {
+                    data[key] = data[key].toUpperCase();
+                }
             }
-            return upperData;
+            return data;
 
         case "extract-fields":
-            const fieldsToExtract = config?.fields; 
-            if (!Array.isArray(fieldsToExtract) || fieldsToExtract.length === 0) {
-                return data; 
+            if (!actionConfig.fields || !Array.isArray(actionConfig.fields)) {
+                return data;
             }
-            
-            const extractedData: any = {};
-            fieldsToExtract.forEach((field) => {
-                if (data[field] !== undefined) extractedData[field] = data[field];
+            const extracted: any = {};
+            actionConfig.fields.forEach((field: string) => {
+                if (data[field] !== undefined) {
+                    extracted[field] = data[field];
+                }
             });
-            return extractedData;
+            return Object.keys(extracted).length > 0 ? extracted : data;
 
         case "add-metadata":
             return {
                 ...data,
                 _metadata: {
                     processedAt: new Date().toISOString(),
-                    source: config?.source || "webhook-pipeline-system",
-                    ...config?.customMeta
+                    customTag: actionConfig.tag || "webhook-pipeline-processed",
                 }
             };
 
