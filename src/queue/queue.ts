@@ -5,4 +5,4 @@ export const pipelineQueue = new Queue("pipeline-jobs", {
   connection: redisConnection as any, 
 });
 
-console.log("✅ Queue file loaded");
+console.log("Queue file loaded");
