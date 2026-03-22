@@ -1,61 +1,72 @@
-import { Worker, Job } from "bullmq";
+import { Worker } from "bullmq";
+import axios from "axios";
 import { eq } from "drizzle-orm";
 import { redisConnection } from "../config/redis";
 import { db } from "../config/db";
-import { jobs } from "../db/schema";
+import { jobs, pipelines, subscribers } from "../db/schema";
 import { processPayload } from "../processing/actions";
-import { DeliveryService } from "../modules/deliveries/delivery.service";
 
-const deliveryService = new DeliveryService();
+console.log("Worker is starting and waiting for jobs...");
 
-console.log("Worker is starting and listening for jobs...");
-
-export const worker = new Worker(
+export const pipelineWorker = new Worker(
     "pipeline-jobs",
-    async (job: Job) => {
-        const { jobId, pipelineId, payload, actionType, actionConfig } = job.data;
-        
-        console.log(`[Job ${job.id}] Picked up! Pipeline: ${pipelineId}`);
+    async (job) => {
+        const { jobId, pipelineId, payload } = job.data;
+        console.log(`[Worker] Picked up job: ${jobId} for pipeline: ${pipelineId}`);
 
         try {
+            await db.update(jobs).set({ status: "processing" }).where(eq(jobs.id, jobId));
+
+            const pipeline = await db.query.pipelines.findFirst({
+                where: eq(pipelines.id, pipelineId)
+            });
+
+            if (!pipeline) throw new Error("Pipeline not found");
+
+            const processedData = processPayload(pipeline.actionType, payload, pipeline.actionConfig);
+
+            const activeSubscribers = await db.query.subscribers.findMany({
+                where: eq(subscribers.pipelineId, pipelineId)
+            });
+
+            const deliveryPromises = activeSubscribers.map(async (sub) => {
+                let attempts = 0;
+                const maxAttempts = 3; 
+                let success = false;
+
+                while (attempts < maxAttempts && !success) {
+                    try {
+                        attempts++;
+                        await axios.post(sub.url, processedData, { timeout: 5000 });
+                        success = true;
+                        console.log(`[Worker] Delivered to ${sub.url} on attempt ${attempts}`);
+                    } catch (error) {
+                        console.error(`[Worker] Failed delivery to ${sub.url} (Attempt ${attempts})`);
+                        if (attempts >= maxAttempts) {
+                            console.error(`[Worker] Max retries reached for ${sub.url}`);
+                        } else {
+                            await new Promise(res => setTimeout(res, 1000));
+                        }
+                    }
+                }
+                return success;
+            });
+
+            await Promise.all(deliveryPromises);
+
             await db.update(jobs)
-                .set({ status: "processing", updatedAt: new Date() })
+                .set({ status: "completed", result: processedData, updatedAt: new Date() })
                 .where(eq(jobs.id, jobId));
 
-            const processedPayload = processPayload(actionType, payload, actionConfig);
-
-            await deliveryService.deliverToSubscribers(pipelineId, jobId, processedPayload);
-
-            await db.update(jobs)
-                .set({ 
-                    status: "completed", 
-                    result: processedPayload,
-                    updatedAt: new Date() 
-                })
-                .where(eq(jobs.id, jobId));
-
-            console.log(`[Job ${job.id}] Successfully completed!`);
+            console.log(`[Worker] Job ${jobId} completed successfully`);
 
         } catch (error: any) {
-            console.error(`[Job ${job.id}] Failed:`, error.message);
-
+            console.error(`[Worker] Job ${jobId} failed: ${error.message}`);
             await db.update(jobs)
-                .set({ 
-                    status: "failed", 
-                    error: error.message,
-                    updatedAt: new Date() 
-                })
+                .set({ status: "failed", updatedAt: new Date() })
                 .where(eq(jobs.id, jobId));
-
             throw error;
         }
     },
-    {
-        connection: redisConnection as any,
-        concurrency: 5 
-    }
+{ connection: redisConnection as any }
 );
-
-worker.on("failed", (job, err) => {
-    console.log(`Worker failed job ${job?.id} with error: ${err.message}`);
-});
