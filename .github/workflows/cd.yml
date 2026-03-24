@@ -1,0 +1,27 @@
+name: Continuous Deployment (CD)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-to-cloud-run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+      - name: Deploy to Google Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: webhook-pipeline-api
+          region: europe-west1
+          source: .
+          flags: '--allow-unauthenticated'
